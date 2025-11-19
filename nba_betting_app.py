@@ -83,6 +83,103 @@ TARGET_COLUMNS = {
     "pra": "label_pra_over",
 }
 
+DISPLAY_COLUMN_ORDER = [
+    "player",
+    "team",
+    "opponent",
+    "line_points",
+    "p_over_points",
+    "p_under_points",
+    "line_rebounds",
+    "p_over_rebounds",
+    "p_under_rebounds",
+    "line_assists",
+    "p_over_assists",
+    "p_under_assists",
+    "line_pra",
+    "p_over_pra",
+    "p_under_pra",
+]
+
+DISPLAY_COLUMN_RENAMES = {
+    "player": "Player",
+    "team": "Team",
+    "opponent": "Opp",
+    "line_points": "Pts line",
+    "p_over_points": "Pts over %",
+    "p_under_points": "Pts under %",
+    "line_rebounds": "Reb line",
+    "p_over_rebounds": "Reb over %",
+    "p_under_rebounds": "Reb under %",
+    "line_assists": "Ast line",
+    "p_over_assists": "Ast over %",
+    "p_under_assists": "Ast under %",
+    "line_pra": "PRA line",
+    "p_over_pra": "PRA over %",
+    "p_under_pra": "PRA under %",
+}
+
+APP_THEME = gr.themes.Soft(
+    primary_hue="indigo",
+    secondary_hue="cyan",
+    neutral_hue="slate",
+)
+
+MINIMAL_UI_CSS = """
+.gradio-container {
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #e2e8f0;
+}
+.page-title h1 {
+    margin-bottom: 0.25rem;
+    font-size: 2rem;
+}
+.page-subtitle p {
+    color: #94a3b8;
+    margin-top: 0;
+}
+.card {
+    background: rgba(15, 23, 42, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 16px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+.game-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.status-card p {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+.pill-button button {
+    width: 100%;
+}
+.projection-table table {
+    font-variant-numeric: tabular-nums;
+}
+.projection-table thead th {
+    position: sticky;
+    top: 0;
+    background: #111827;
+    color: #f8fafc;
+    z-index: 1;
+}
+.callout p {
+    font-size: 1rem;
+    color: #e2e8f0;
+}
+.custom-inputs .gradio-dropdown label,
+.custom-inputs .gradio-slider label {
+    color: #cbd5f5;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -705,32 +802,24 @@ def generate_predictions_for_next_game(models: Dict[str, Pipeline]) -> Dict:
         }
 
     df = pd.DataFrame(rows)
-    desired_cols = [
-        "player",
-        "team",
-        "opponent",
-        "line_points",
-        "p_over_points",
-        "p_under_points",
-        "line_rebounds",
-        "p_over_rebounds",
-        "p_under_rebounds",
-        "line_assists",
-        "p_over_assists",
-        "p_under_assists",
-        "line_pra",
-        "p_over_pra",
-        "p_under_pra",
-    ]
-    df = df[desired_cols]
+    df = df[DISPLAY_COLUMN_ORDER]
     df.sort_values(by="p_over_points", ascending=False, inplace=True)
+
+    display_df = df.copy()
+    prob_cols = [col for col in display_df.columns if col.startswith("p_")]
+    line_cols = [col for col in display_df.columns if col.startswith("line_")]
+    if prob_cols:
+        display_df[prob_cols] = (display_df[prob_cols] * 100).round(1)
+    if line_cols:
+        display_df[line_cols] = display_df[line_cols].round(1)
+    display_df.rename(columns=DISPLAY_COLUMN_RENAMES, inplace=True)
 
     PLAYER_FEATURE_CACHE.clear()
     PLAYER_FEATURE_CACHE.update(feature_cache)
 
     return {
         "game_info": game.label,
-        "table": df,
+        "table": display_df,
         "player_options": list(feature_cache.keys()),
     }
 
@@ -775,73 +864,66 @@ def create_interface(models: Dict[str, Pipeline]) -> gr.Blocks:
     def custom_line(player_label: str, market: str, line_value: float):
         return compute_custom_line_probability(player_label, market, line_value)
 
-    with gr.Blocks(title="NBA Betting Projections") as demo:
+    with gr.Blocks(
+        title="NBA Betting Projections",
+        theme=APP_THEME,
+        css=MINIMAL_UI_CSS,
+    ) as demo:
         gr.Markdown(
-            "# NBA Betting Projection Demo\n"
-            "Recent player form drives synthetic player prop probabilities for the "
-            "next scheduled NBA matchup.\n"
-            "TODO: plug in sportsbook lines once an odds API is available."
+            "# NBA Betting Projection Demo",
+            elem_classes=["page-title"],
         )
-        game_info = gr.Markdown("Locating the next game...")
-        table = gr.Dataframe(
-            headers=[
-                "player",
-                "team",
-                "opponent",
-                "line_points",
-                "p_over_points",
-                "p_under_points",
-                "line_rebounds",
-                "p_over_rebounds",
-                "p_under_rebounds",
-                "line_assists",
-                "p_over_assists",
-                "p_under_assists",
-                "line_pra",
-                "p_over_pra",
-                "p_under_pra",
-            ],
-            datatype=[
-                "str",
-                "str",
-                "str",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-                "number",
-            ],
-            interactive=False,
-            wrap=True,
+        gr.Markdown(
+            "Recent player form drives prop win probabilities for the next scheduled matchup.",
+            elem_classes=["page-subtitle"],
         )
-        status = gr.Markdown("")
-        refresh_button = gr.Button("Refresh Next Game Projections")
 
         with gr.Row():
-            player_picker = gr.Dropdown(label="Player", choices=[])
-            market_picker = gr.Dropdown(
-                label="Market",
-                choices=["points", "rebounds", "assists", "pra"],
-                value="points",
+            game_info = gr.Markdown(
+                "Locating the next game...",
+                elem_classes=["card", "game-card"],
             )
-            custom_line_slider = gr.Slider(
-                label="Custom Line",
-                minimum=0,
-                maximum=80,
-                value=20,
-                step=0.5,
-            )
-        custom_line_output = gr.Markdown(
-            "Use the controls above to sanity-check a custom line via a simple normal approximation."
+            with gr.Column(scale=1, min_width=260):
+                status = gr.Markdown(
+                    "Loading projections...",
+                    elem_classes=["card", "status-card"],
+                )
+                refresh_button = gr.Button(
+                    "Refresh Next Game Projections",
+                    elem_classes=["pill-button"],
+                )
+
+        table = gr.Dataframe(
+            label="Player prop probabilities",
+            interactive=False,
+            wrap=True,
+            elem_classes=["card", "projection-table"],
         )
-        compute_button = gr.Button("Compute Custom Line Probability")
+
+        with gr.Column(elem_classes=["card"]):
+            gr.Markdown("### Custom line explorer")
+            with gr.Row(elem_classes=["custom-inputs"]):
+                player_picker = gr.Dropdown(label="Player", choices=[])
+                market_picker = gr.Dropdown(
+                    label="Market",
+                    choices=["points", "rebounds", "assists", "pra"],
+                    value="points",
+                )
+                custom_line_slider = gr.Slider(
+                    label="Custom Line",
+                    minimum=0,
+                    maximum=80,
+                    value=20,
+                    step=0.5,
+                )
+            custom_line_output = gr.Markdown(
+                "Use the controls above to sanity-check a custom line via a quick normal approximation.",
+                elem_classes=["callout"],
+            )
+            compute_button = gr.Button(
+                "Compute Custom Line Probability",
+                elem_classes=["pill-button"],
+            )
 
         refresh_button.click(
             refresh,
